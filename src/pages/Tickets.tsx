@@ -34,7 +34,7 @@ interface TicketFromAPI {
   ticketNumber: string;
   panelId: string | null;
   faultId: string | null;
-  status: 'open' | 'in_progress' | 'resolved' | 'closed';
+  status: 'open' | 'in_progress' | 'closed';
   priority: 'low' | 'medium' | 'high' | 'critical';
   createdAt: string;
   updatedAt: string;
@@ -67,8 +67,7 @@ const statusColors: Record<string, string> = {
   open: 'bg-blue-500/10 text-blue-500 border-blue-500/30',
   'in-progress': 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30',
   in_progress: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/30',
-  resolved: 'bg-green-500/10 text-green-500 border-green-500/30',
-  closed: 'bg-muted text-muted-foreground border-muted',
+  closed: 'bg-muted text-muted-foreground border-muted'
 };
 
 const priorityColors: Record<string, string> = {
@@ -82,7 +81,6 @@ const statusIcons: Record<string, React.ComponentType<{ className?: string }>> =
   open: AlertTriangle,
   'in-progress': Clock,
   in_progress: Clock,
-  resolved: CheckCircle,
   closed: XCircle,
 };
 
@@ -136,7 +134,6 @@ export default function Tickets() {
   const ticketCounts = {
     open: tickets.filter(t => t.status === 'open').length,
     'in-progress': tickets.filter(t => t.status === 'in_progress').length,
-    resolved: tickets.filter(t => t.status === 'resolved').length,
     closed: tickets.filter(t => t.status === 'closed').length,
   };
 
@@ -292,7 +289,6 @@ export default function Tickets() {
             <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="open">Open</SelectItem>
             <SelectItem value="in-progress">In Progress</SelectItem>
-            <SelectItem value="resolved">Resolved</SelectItem>
             <SelectItem value="closed">Closed</SelectItem>
           </SelectContent>
         </Select>
@@ -549,8 +545,8 @@ export default function Tickets() {
           <CheckCircle className="h-12 w-12 text-muted-foreground mb-4" />
           <h3 className="text-lg font-semibold">No tickets found</h3>
           <p className="text-muted-foreground">
-            {tickets.length === 0 
-              ? 'Create your first ticket to get started.' 
+            {tickets.length === 0
+              ? 'Create your first ticket to get started.'
               : 'Try adjusting your filters.'}
           </p>
         </div>
@@ -629,7 +625,7 @@ export default function Tickets() {
                   )}
 
                   {/* Resolution info */}
-                  {ticket.status === 'resolved' && ticket.resolutionNotes && (
+                  {ticket.status === 'closed' && ticket.resolutionNotes && (
                     <div className="mt-4 rounded-lg border border-green-500/30 bg-green-500/5 p-3">
                       <p className="text-xs font-medium text-green-500">Resolution</p>
                       <p className="mt-1 text-sm">{ticket.resolutionNotes}</p>

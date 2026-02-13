@@ -14,7 +14,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Technician } from '@/types/solar';
+import { Technician, Ticket } from '@/types/solar';
 import { cn } from '@/lib/utils';
 import {
   Phone,
@@ -23,6 +23,7 @@ import {
   Clock,
   CheckCircle,
   AlertCircle,
+  AlertTriangle,
   Calendar,
   Award,
   UserPlus,
@@ -62,16 +63,25 @@ export default function Technicians() {
     certifications: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [availableTickets, setAvailableTickets] = useState<Ticket[]>([]);
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const [assigningTech, setAssigningTech] = useState<Technician | null>(null);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [scheduledTech, setScheduledTech] = useState<Technician | null>(null);
+  const [assignedTickets, setAssignedTickets] = useState<Ticket[]>([]);
+  const [openTicketsCount, setOpenTicketsCount] = useState(0);
 
   useEffect(() => {
-    async function fetchTechnicians() {
+    async function fetchData() {
       try {
-        const response = await fetch('/api/technicians');
-        if (response.ok) {
-          const data = await response.json();
-          if (data.length > 0) {
+        // Fetch technicians
+        const techResponse = await fetch('/api/technicians');
+        if (techResponse.ok) {
+          const techData = await techResponse.json();
+          if (techData.length > 0) {
             // Parse skills and certifications from JSON strings
-            const parsedData = data.map((tech: any) => ({
+            const parsedData = techData.map((tech: any) => ({
               ...tech,
               skills: JSON.parse(tech.skills || '[]'),
               certifications: JSON.parse(tech.certifications || '[]'),
@@ -79,14 +89,21 @@ export default function Technicians() {
             setTechnicians(parsedData);
           }
         }
+
+        // Fetch open tickets count
+        const ticketsResponse = await fetch('/api/tickets?status=open');
+        if (ticketsResponse.ok) {
+          const ticketsData = await ticketsResponse.json();
+          setOpenTicketsCount(ticketsData.filter((ticket: Ticket) => !ticket.assignedTechnicianId).length);
+        }
       } catch (err) {
-        console.warn('API unavailable, showing empty technicians');
-        // Technicians remain empty
+        console.warn('API unavailable, showing empty data');
+        // Data remains empty
       } finally {
         setLoading(false);
       }
     }
-    fetchTechnicians();
+    fetchData();
   }, []);
 
   const totalTechnicians = technicians.length;
@@ -200,6 +217,91 @@ export default function Technicians() {
     }
   };
 
+  const fetchAvailableTickets = async () => {
+    try {
+      const response = await fetch('/api/tickets?status=open');
+      if (response.ok) {
+        const tickets = await response.json();
+        setAvailableTickets(tickets.filter((ticket: Ticket) => !ticket.assignedTechnicianId));
+      }
+    } catch (err) {
+      console.error('Failed to fetch available tickets:', err);
+    }
+  };
+
+  const handleAssignTicket = async () => {
+    if (!selectedTicketId || !assigningTech) return;
+
+    try {
+      const response = await fetch(`/api/tickets/${selectedTicketId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignedTechnicianId: assigningTech.id,
+          status: 'in_progress'
+        }),
+      });
+
+      if (response.ok) {
+        // Update technician state
+        setTechnicians(prev => prev.map(t =>
+          t.id === assigningTech.id
+            ? { ...t, activeTickets: t.activeTickets + 1, status: 'busy' as const }
+            : t
+        ));
+        setAssignDialogOpen(false);
+        setSelectedTicketId(null);
+        setAssigningTech(null);
+        setAvailableTickets([]);
+      } else {
+        alert('Failed to assign ticket');
+      }
+    } catch (err) {
+      console.error('Failed to assign ticket:', err);
+      alert('Failed to assign ticket');
+    }
+  };
+
+  const handleScheduleClick = async (tech: Technician) => {
+    setScheduledTech(tech);
+    try {
+      const response = await fetch(`/api/tickets?assignedTo=${tech.id}`);
+      if (response.ok) {
+        const tickets = await response.json();
+        setAssignedTickets(tickets);
+        setScheduleDialogOpen(true);
+      }
+    } catch (err) {
+      console.error('Failed to fetch assigned tickets:', err);
+    }
+  };
+
+  const getExpectedResolutionDate = (ticket: Ticket) => {
+    const createdDate = new Date(ticket.createdAt);
+    let daysToAdd = 0;
+
+    switch (ticket.priority) {
+      case 'critical':
+        daysToAdd = 1;
+        break;
+      case 'high':
+        daysToAdd = 3;
+        break;
+      case 'medium':
+        daysToAdd = 7;
+        break;
+      case 'low':
+        daysToAdd = 14;
+        break;
+      default:
+        daysToAdd = 7;
+    }
+
+    const expectedDate = new Date(createdDate);
+    expectedDate.setDate(expectedDate.getDate() + daysToAdd);
+    return expectedDate.toLocaleDateString();
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -286,6 +388,104 @@ export default function Technicians() {
         </DialogContent>
       </Dialog>
 
+      {/* Assign Ticket Dialog */}
+      <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Assign Ticket to {assigningTech?.name}</DialogTitle>
+            <DialogDescription>
+              Select an available ticket to assign to this technician.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            {availableTickets.length === 0 ? (
+              <p className="text-muted-foreground">No available tickets to assign.</p>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {availableTickets.map(ticket => (
+                  <div
+                    key={ticket.id}
+                    className={cn(
+                      'p-3 border rounded-lg cursor-pointer hover:bg-accent',
+                      selectedTicketId === ticket.id && 'border-primary bg-accent'
+                    )}
+                    onClick={() => setSelectedTicketId(ticket.id)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{ticket.ticketNumber}</p>
+                        <p className="text-sm text-muted-foreground">{ticket.description}</p>
+                        <Badge variant="outline" className="mt-1">
+                          {ticket.priority}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAssignTicket}
+              disabled={!selectedTicketId}
+            >
+              Assign Ticket
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Schedule Dialog */}
+      <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
+        <DialogContent className="sm:max-w-[700px]">
+          <DialogHeader>
+            <DialogTitle>Schedule for {scheduledTech?.name}</DialogTitle>
+            <DialogDescription>
+              Current assigned tickets and expected resolution dates
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            {assignedTickets.length === 0 ? (
+              <p className="text-muted-foreground">No tickets currently assigned to this technician.</p>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto">
+                {assignedTickets.map(ticket => (
+                  <div key={ticket.id} className="p-4 border rounded-lg">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <p className="font-medium">{ticket.ticketNumber}</p>
+                          <Badge variant="outline" className="text-xs">
+                            {ticket.priority}
+                          </Badge>
+                          <Badge className={statusColors[ticket.status] || statusColors.open}>
+                            {ticket.status}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-2">{ticket.description}</p>
+                        <div className="text-xs text-muted-foreground">
+                          <p>Created: {new Date(ticket.createdAt).toLocaleDateString()}</p>
+                          <p>Expected Resolution: {getExpectedResolutionDate(ticket)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setScheduleDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Technicians</h1>
@@ -300,7 +500,7 @@ export default function Technicians() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
@@ -349,6 +549,19 @@ export default function Technicians() {
               </div>
               <div className="rounded-xl bg-muted/10 p-3">
                 <AlertCircle className="h-6 w-6 text-muted-foreground" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Open Tickets</p>
+                <p className="text-3xl font-bold text-blue-600">{openTicketsCount}</p>
+              </div>
+              <div className="rounded-xl bg-blue-500/10 p-3">
+                <AlertTriangle className="h-6 w-6 text-blue-500" />
               </div>
             </div>
           </CardContent>
@@ -478,11 +691,25 @@ export default function Technicians() {
 
                 {/* Actions */}
                 <div className="mt-4 flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => handleScheduleClick(tech)}
+                  >
                     <Calendar className="mr-2 h-4 w-4" />
                     Schedule
                   </Button>
-                  <Button size="sm" className="flex-1" disabled={tech.status !== 'available'}>
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    disabled={tech.status === 'offline'}
+                    onClick={() => {
+                      setAssigningTech(tech);
+                      fetchAvailableTickets();
+                      setAssignDialogOpen(true);
+                    }}
+                  >
                     Assign Ticket
                   </Button>
                   <Button variant="destructive" size="sm" onClick={() => handleDeleteTechnician(tech.id)}>
